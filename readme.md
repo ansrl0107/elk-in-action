@@ -9,4 +9,4 @@ node.js + typescript를 통해 간단히 개발한 서버에 docker를 이용한
 - Filebeat: Nginx에서 남긴 access log를 Elasticsearch로 넣는 역할
 
 ## Todo
-- [] API access logging with Elasticsearch + Filebeat + Logstash
+- [ ] API access logging with Elasticsearch + Filebeat + Logstash
