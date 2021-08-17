@@ -1,0 +1,127 @@
+version: "3.8"
+
+networks:
+  application_network:
+    driver: bridge
+  elk_network:
+    driver: bridge
+
+volumes:
+  nginx_logs:
+  elasticsearch_volume:
+  mysql_volume:
+
+services:
+  app:
+    build:
+      context: ./
+    restart: always
+    container_name: app
+    environment:
+      - MYSQL_URI=mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      - PORT=3000
+    depends_on:
+      - mysql
+    networks:
+      - application_network
+      - elk_network
+  mysql:
+    image: mysql:8.0
+    restart: always
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    command: # 명령어 실행
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_volume:/var/lib/mysql
+    networks:
+      - application_network
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION}
+    restart: always
+    container_name: elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+      discovery.type: single-node
+    volumes:
+      - elasticsearch_volume:/usr/share/elasticsearch/data
+    networks:
+      - elk_network
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELK_VERSION}
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    networks:
+      - elk_network
+    depends_on:
+      - elasticsearch
+  apm-server:
+    container_name: apm-server
+    image: docker.elastic.co/apm/apm-server:${ELK_VERSION}
+    ports:
+      - 8200:8200
+    depends_on:
+      - elasticsearch
+      - kibana
+    networks:
+      - elk_network 
+    command: >
+      apm-server -e
+        -E apm-server.rum.enabled=true
+        -E setup.kibana.host=kibana:5601
+        -E setup.template.settings.index.number_of_replicas=0
+        -E apm-server.kibana.enabled=true
+        -E apm-server.kibana.host=kibana:5601
+        -E output.elasticsearch.hosts=["elasticsearch:9200"]
+  nginx:
+    container_name: nginx
+    image: nginx:1.20.1
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app
+    volumes:
+      - nginx_logs:/var/log/nginx
+    networks:
+      - application_network
+  filebeat:
+    build:
+      context: ./filebeat
+      args:
+        ELK_VERSION: ${ELK_VERSION}
+    container_name: filebeat
+    volumes:
+      - nginx_logs:/var/log/nginx
+    environment:
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+    networks:
+      - elk_network
+    depends_on: 
+      - app
+      - nginx
+      - elasticsearch
+      - kibana
+  logstash:
+    build:
+      context: ./logstash
+      args:
+        ELK_VERSION: ${ELK_VERSION}
+    container_name: logstash
+    
